@@ -465,6 +465,27 @@ def _cmd_import_cockpit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_tui(args: argparse.Namespace) -> int:
+    try:
+        from codex_swap import tui as tui_mod
+    except CodexSwapError as e:
+        _out(f"Error: {e}")
+        return 1
+    tui_mod.run()
+    return 0
+
+
+def _cmd_tui(args: argparse.Namespace) -> int:
+    from codex_swap import tui as tui_mod
+
+    try:
+        tui_mod.run()
+    except CodexSwapError as e:
+        _out(f"Error: {e}")
+        return 1
+    return 0
+
+
 def _cmd_purge(args: argparse.Namespace) -> int:
     if not args.yes:
         answer = input("Remove ALL codex-swap data (stored accounts)? [y/N] ").strip().lower()
@@ -527,6 +548,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_usage)
+
+    p = sub.add_parser("tui", help="Interactive dashboard (live usage, switching from the UI)")
+    p.set_defaults(func=_cmd_tui)
 
     p = sub.add_parser(
         "auto",

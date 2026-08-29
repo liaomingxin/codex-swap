@@ -137,6 +137,11 @@ class CodexAccountSwitcher:
         later = [e for e in entries if e.number > active.number]
         return later[0] if later else entries[0]
 
+    def resolve_target(self, target: str | None) -> SlotEntry:
+        """Public wrapper used by front ends (TUI) before they ask for
+        confirmation; raises the same errors :meth:`switch` would."""
+        return self._resolve_target(target)
+
     def switch(self, target: str | None = None) -> dict:
         """Swap the live login, stashing the outgoing one first.
 

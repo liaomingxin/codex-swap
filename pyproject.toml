@@ -1,6 +1,6 @@
 [project]
 name = "codex-swap"
-version = "0.2.0"
+version = "0.3.0"
 description = "Multi-account switcher for OpenAI Codex CLI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,6 +26,8 @@ dependencies = []
 [project.optional-dependencies]
 # Only for `cxswap import-cockpit` (AES-256-GCM decryption of Cockpit's store)
 cockpit = ["cryptography>=42"]
+# Only for `cxswap tui` (interactive dashboard)
+tui = ["textual>=8.2.8"]
 
 [project.urls]
 Repository = "https://github.com/liaomingxin/codex-swap"
@@ -45,7 +47,9 @@ packages = ["src/codex_swap"]
 dev = [
     "cryptography>=50.0.1",
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "ruff>=0.16.5",
+    "textual>=8.2.8",
 ]
 
 [tool.ruff]
@@ -67,3 +71,5 @@ select = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -4,6 +4,17 @@ All notable changes to codex-swap are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-08-29
+
+### Added
+
+- `cxswap tui`: interactive Textual dashboard — per-account usage cards
+  (same data as `usage --stats`), auto-refresh every 60s (cache-aware:
+  idling costs ~1 request / 5min / slot), `r` forces a refresh, `s`/`1-9`
+  switch accounts via a confirm modal, `a` toggles auto-refresh. Ships as
+  the `tui` extra (`uv tool install --editable '.[tui]'`); the core stays
+  zero-dependency.
+
 ## [0.2.0] — 2026-08-29
 
 ### Added
@@ -64,5 +75,6 @@ Initial release.
 - Atomic durable writes everywhere (temp → fsync → `os.replace` → dir
   fsync); zero runtime dependencies; 52 tests.
 
+[0.3.0]: https://github.com/liaomingxin/codex-swap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/liaomingxin/codex-swap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/liaomingxin/codex-swap/releases/tag/v0.1.0

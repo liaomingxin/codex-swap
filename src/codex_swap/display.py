@@ -74,6 +74,15 @@ def health_color(pct: float) -> str:
     return _GREEN
 
 
+def health_color_rich(pct: float) -> str:
+    """Same scale as health_color, as a Rich markup color name (TUI side)."""
+    if pct >= 80:
+        return "red"
+    if pct >= 50:
+        return "yellow"
+    return "green"
+
+
 # ------------------------------------------------------------------- bars
 
 BAR_WIDTH = 26

@@ -73,6 +73,13 @@ cxswap purge [--yes]          # remove all codex-swap data
 stderr. Payloads carry `schemaVersion: 1` (additive evolution, same contract
 as claude-swap).
 
+**Interactive dashboard**:
+
+```bash
+uv tool install --editable '.[tui]'   # one-time: adds textual
+cxswap tui                            # live cards, keys: r/s/1-9/a/q
+```
+
 ## Data layout
 
 | What | Where |
