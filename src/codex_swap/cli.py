@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 
 from codex_swap import __version__, display
 from codex_swap.exceptions import CodexSwapError
@@ -198,6 +198,102 @@ def _model_lines(model_limits: list[dict], now: float) -> list[str]:
     return lines
 
 
+def _fmt_count(n: int | float | None) -> str:
+    """Compact token counts: 12.3M / 840k / 950."""
+    if n is None:
+        return "-"
+    n = float(n)
+    for unit, factor in (("B", 1e9), ("M", 1e6), ("k", 1e3)):
+        if n >= factor:
+            return f"{n / factor:.1f}{unit}"
+    return f"{int(n)}"
+
+
+def _credits_line(usage: dict) -> str | None:
+    parts = []
+    balance = usage.get("creditsBalance")
+    if usage.get("creditsUnlimited"):
+        parts.append("unlimited")
+    elif isinstance(balance, str) and balance not in ("", "0"):
+        try:
+            parts.append(f"${float(balance):.2f} balance")
+        except ValueError:
+            parts.append(f"{balance} credits")
+    local = usage.get("approxLocalMessages")
+    cloud = usage.get("approxCloudMessages")
+    if isinstance(local, list) and len(local) == 2:
+        parts.append(
+            f"~{local[1]} local msgs left" if local[1] else "no local msgs left"
+        )
+    if isinstance(cloud, list) and len(cloud) == 2 and cloud[1]:
+        parts.append(f"~{cloud[1]} cloud msgs left")
+    avail = usage.get("resetCreditsAvailable")
+    if isinstance(avail, int):
+        applicable = usage.get("resetCreditsApplicable")
+        tag = f"{avail} rate-limit reset{'s' if avail != 1 else ''} available"
+        if isinstance(applicable, int) and applicable != avail:
+            tag += f" ({applicable} applicable now)"
+        parts.append(tag)
+    if not parts:
+        return None
+    return display.dim("  · ".join(parts))
+
+
+def _token_line(row: dict) -> str | None:
+    parts = []
+    expires = row.get("accessTokenExpiresAt")
+    if row.get("accessExpired"):
+        parts.append(display.paint("token EXPIRED", "\x1b[31m"))
+    elif expires:
+        try:
+            dt = datetime.fromisoformat(expires)
+            days = (dt - datetime.now(timezone.utc)).total_seconds() / 86400
+            parts.append(f"token valid {days:.0f}d")
+        except ValueError:
+            pass
+    last_refresh = row.get("lastRefresh")
+    if isinstance(last_refresh, str) and last_refresh[:10]:
+        parts.append(f"refreshed {last_refresh[:10]}")
+    until = row.get("subscriptionActiveUntil")
+    if isinstance(until, str) and until[:10]:
+        parts.append(f"subscription until {until[:10]}")
+    if not parts:
+        return None
+    return display.dim("  · ".join(parts))
+
+
+def _stats_line(stats: dict) -> str | None:
+    parts = []
+    if stats.get("displayName"):
+        parts.append(str(stats["displayName"]))
+    lt = stats.get("lifetime_tokens")
+    if isinstance(lt, (int, float)):
+        parts.append(f"lifetime {_fmt_count(lt)} tok")
+    peak = stats.get("peak_daily_tokens")
+    if isinstance(peak, (int, float)):
+        parts.append(f"peak day {_fmt_count(peak)}")
+    streak = stats.get("current_streak_days")
+    best = stats.get("longest_streak_days")
+    if isinstance(streak, int):
+        tag = f"streak {streak}d"
+        if isinstance(best, int):
+            tag += f" (best {best}d)"
+        parts.append(tag)
+    threads = stats.get("total_threads")
+    if isinstance(threads, int):
+        parts.append(f"{threads} threads")
+    effort = stats.get("most_used_effort")
+    if effort:
+        pct = stats.get("most_used_effort_pct")
+        tag = f"effort: {effort}"
+        if isinstance(pct, (int, float)):
+            tag += f" {pct:.0f}%"
+        parts.append(tag)
+    if not parts:
+        return None
+    return display.paint("  · ".join(parts), "\x1b[2m")
+
+
 def _account_card(row: dict, now: float) -> list[str]:
     """A card per account: header + window bars + model limits."""
     usage = row.get("usage")
@@ -234,7 +330,14 @@ def _account_card(row: dict, now: float) -> list[str]:
     if secondary:
         label = display.window_label(secondary.get("windowSeconds", 0))
         lines.append(_window_row(label, secondary, now))
+    code_review = usage.get("codeReviewWindow")
+    if code_review:
+        lines.append(_window_row("Review", code_review, now))
     lines.extend(_model_lines(usage.get("modelLimits", []), now))
+
+    credits = _credits_line(usage)
+    if credits:
+        lines.append(f"  {credits}")
 
     age = row.get("usageAgeSeconds")
     status = row.get("usageStatus", "ok")
@@ -245,11 +348,20 @@ def _account_card(row: dict, now: float) -> list[str]:
         meta.append(display.dim(f"cached {display.fmt_age(age)}"))
     if meta:
         lines.append(f"  {'   '.join(meta)}")
+
+    if row.get("stats"):
+        stats_line = _stats_line(row["stats"])
+        if stats_line:
+            lines.append(stats_line)
+
+    token_line = _token_line(row)
+    if token_line:
+        lines.append(f"  {token_line}")
     return lines
 
 
 def _cmd_usage(args: argparse.Namespace) -> int:
-    payload = CodexAccountSwitcher().usage_report(force=args.refresh)
+    payload = CodexAccountSwitcher().usage_report(force=args.refresh, stats=args.stats)
     if args.json:
         print(json.dumps(payload))
         return 0
@@ -405,8 +517,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_unclaimed)
 
-    p = sub.add_parser("usage", help="Per-account rate-limit usage (weekly + 5h windows)")
+    p = sub.add_parser(
+        "usage", help="Per-account rate-limit usage (windows, credits, token state)"
+    )
     p.add_argument("--refresh", action="store_true", help="Bypass the 5-minute cache")
+    p.add_argument(
+        "--stats",
+        action="store_true",
+        help="Also fetch /profiles/me (lifetime tokens, streaks, threads) — "
+        "one extra request per account",
+    )
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_usage)
 

@@ -23,6 +23,7 @@ from codex_swap.exceptions import AccountNotFoundError, AuthFileError, SwitchErr
 from codex_swap.identity import AccountIdentity, identity_from_auth
 from codex_swap.paths import auth_path, backup_root, unclaimed_dir
 from codex_swap.store import AccountStore, SlotEntry
+from codex_swap.usage import AccountStats
 from codex_swap.usage_store import UsageCache
 
 # Politeness stagger between per-slot usage fetches in one pass — N slots
@@ -246,7 +247,55 @@ class CodexAccountSwitcher:
             self.store.write_credential(entry, text)
         return auth
 
-    def usage_report(self, *, force: bool = False, opener=None) -> dict:
+    def _enrich_row_credential(self, entry: SlotEntry, row: dict) -> None:
+        """Free detail from the stored credential: token/subscription state.
+
+        Never touches the network — parses the slot's own JWTs."""
+        try:
+            auth = (
+                self._slot_auth_dict(entry)
+                if not row.get("active")
+                else json.loads(auth_path().read_text(encoding="utf-8"))
+            )
+        except Exception:
+            return
+        identity = identity_from_auth(auth)
+        if identity is None:
+            return
+        tokens = auth.get("tokens") or {}
+        if identity.access_expires_at is not None:
+            row["accessTokenExpiresAt"] = identity.access_expires_at.isoformat()
+            row["accessExpired"] = identity.access_expired
+        last_refresh = auth.get("last_refresh")
+        if isinstance(last_refresh, str):
+            row["lastRefresh"] = last_refresh
+        if identity.subscription_active_until:
+            row["subscriptionActiveUntil"] = identity.subscription_active_until
+        if identity.display_name:
+            row["displayName"] = identity.display_name
+        account_id = tokens.get("account_id")
+        if isinstance(account_id, str) and account_id:
+            row["accountId"] = account_id
+
+    def _fetch_slot_stats(
+        self, entry: SlotEntry, row: dict, opener=None
+    ) -> AccountStats | None:
+        """Best-effort profiles/me fetch; supplementary, never fails a row."""
+        try:
+            if row.get("active"):
+                self.read_live()  # presence check: live login must be readable
+                auth = json.loads(auth_path().read_text(encoding="utf-8"))
+            else:
+                auth = self._slot_auth_dict(entry)
+            tokens = auth.get("tokens") or {}
+            access = tokens.get("access_token")
+            if not isinstance(access, str) or not access or row.get("accessExpired"):
+                return None
+            return usage_api.fetch_stats(access, tokens.get("account_id"), opener=opener)
+        except (usage_api.UsageAuthError, usage_api.RefreshError, OSError, Exception):
+            return None
+
+    def usage_report(self, *, force: bool = False, opener=None, stats: bool = False) -> dict:
         """Usage rows for every slot, fetched under a serve-TTL cache.
 
         Token policy per slot (the openusage #516 lesson, adapted):
@@ -326,6 +375,17 @@ class CodexAccountSwitcher:
                 row["usage"] = snapshot.to_json()
                 age = time.time() - snapshot.fetched_at
                 row["usageAgeSeconds"] = round(age)
+                self._enrich_row_credential(entry, row)
+                if stats:
+                    account_stats = cache.get_stats(entry.number)
+                    if account_stats is None:
+                        account_stats = self._fetch_slot_stats(entry, row, opener=opener)
+                        if account_stats is not None:
+                            cache.put(entry.number, snapshot, stats=account_stats)
+                    if account_stats is not None:
+                        row["stats"] = account_stats.to_json()
+            else:
+                self._enrich_row_credential(entry, row)
             rows.append(row)
         return {
             "schemaVersion": 1,

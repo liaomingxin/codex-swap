@@ -115,6 +115,32 @@ def test_snapshot_json_roundtrip():
     assert restored.to_json() == snap.to_json()
 
 
+def test_snapshot_captures_supplementary_fields():
+    payload = dict(
+        REAL_SHAPED,
+        credits={"balance": "12.50", "unlimited": False,
+                 "approx_local_messages": [3, 17], "approx_cloud_messages": [0, 2]},
+        rate_limit_reset_credits={"available_count": 2, "applicable_available_count": 1},
+        code_review_rate_limit={"primary_window": {
+            "used_percent": 9, "limit_window_seconds": 18000, "reset_at": 123,
+        }},
+        rate_limit_reached_type=None,
+    )
+    snap = usage_api.parse_usage(payload)
+    assert snap.credits_balance == "12.50"
+    assert snap.approx_local_messages == (3, 17)
+    assert snap.approx_cloud_messages == (0, 2)
+    assert snap.reset_credits_available == 2
+    assert snap.reset_credits_applicable == 1
+    assert snap.code_review is not None and snap.code_review.used_percent == 9
+    # survives the cache roundtrip
+    restored = usage_api.UsageSnapshot.from_json(snap.to_json())
+    assert restored.credits_balance == "12.50"
+    assert restored.reset_credits_available == 2
+    assert restored.approx_local_messages == (3, 17)
+    assert restored.code_review is not None
+
+
 def test_parse_usage_degrades_to_empty():
     snap = usage_api.parse_usage({"rate_limit": None, "additional_rate_limits": "nope"})
     assert snap.primary is None and snap.model_limits == ()
