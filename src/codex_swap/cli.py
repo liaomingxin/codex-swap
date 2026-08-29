@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from codex_swap import __version__, display
 from codex_swap.exceptions import CodexSwapError
@@ -222,9 +222,7 @@ def _credits_line(usage: dict) -> str | None:
     local = usage.get("approxLocalMessages")
     cloud = usage.get("approxCloudMessages")
     if isinstance(local, list) and len(local) == 2:
-        parts.append(
-            f"~{local[1]} local msgs left" if local[1] else "no local msgs left"
-        )
+        parts.append(f"~{local[1]} local msgs left" if local[1] else "no local msgs left")
     if isinstance(cloud, list) and len(cloud) == 2 and cloud[1]:
         parts.append(f"~{cloud[1]} cloud msgs left")
     avail = usage.get("resetCreditsAvailable")
@@ -247,7 +245,7 @@ def _token_line(row: dict) -> str | None:
     elif expires:
         try:
             dt = datetime.fromisoformat(expires)
-            days = (dt - datetime.now(timezone.utc)).total_seconds() / 86400
+            days = (dt - datetime.now(UTC)).total_seconds() / 86400
             parts.append(f"token valid {days:.0f}d")
         except ValueError:
             pass

@@ -118,12 +118,20 @@ def test_snapshot_json_roundtrip():
 def test_snapshot_captures_supplementary_fields():
     payload = dict(
         REAL_SHAPED,
-        credits={"balance": "12.50", "unlimited": False,
-                 "approx_local_messages": [3, 17], "approx_cloud_messages": [0, 2]},
+        credits={
+            "balance": "12.50",
+            "unlimited": False,
+            "approx_local_messages": [3, 17],
+            "approx_cloud_messages": [0, 2],
+        },
         rate_limit_reset_credits={"available_count": 2, "applicable_available_count": 1},
-        code_review_rate_limit={"primary_window": {
-            "used_percent": 9, "limit_window_seconds": 18000, "reset_at": 123,
-        }},
+        code_review_rate_limit={
+            "primary_window": {
+                "used_percent": 9,
+                "limit_window_seconds": 18000,
+                "reset_at": 123,
+            }
+        },
         rate_limit_reached_type=None,
     )
     snap = usage_api.parse_usage(payload)

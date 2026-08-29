@@ -4,7 +4,7 @@ All notable changes to codex-swap are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-08-29
 
 ### Added
 
@@ -14,9 +14,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plaintext UI export file (`--file`, zero extra deps, cross-machine).
   Newest-token-wins: a slot's credentials are never downgraded to an
   older copy.
-- Fixed identity parsing: JWT claims are now read from both the AUTH and
+- Redesigned `cxswap usage` human view: per-account cards with
+  color-graded unicode usage bars (green <50 / yellow <80 / red >=80),
+  relative + absolute reset times, per-model limit rows, LIMIT REACHED
+  markers, cached-age notes. TTY-gated color (`NO_COLOR`,
+  `CLICOLOR_FORCE=1`); `--json` output unchanged.
+- Richer usage detail, split by cost:
+  - free (same response): credits balance / approx local+cloud messages
+    remaining, rate-limit reset credits (available vs applicable),
+    code-review rate-limit window;
+  - free (stored credential): token validity + days left, last refresh,
+    subscription until;
+  - `--stats` (one extra request per account, `/profiles/me`): display
+    name, lifetime tokens, peak-day tokens, streaks, thread count,
+    most-used reasoning effort.
+
+### Fixed
+
+- Identity parsing: JWT claims are now read from both the AUTH and
   PROFILE namespaces (an `or`-chain shadowed the second when both were
   present, e.g. emails in access tokens).
+- `UsageSnapshot.to_json` dropped the supplementary fields on the cache
+  roundtrip (parse worked, serialization didn't) — now covered by a
+  roundtrip test.
 
 ## [0.1.0] — 2026-08-29
 
@@ -44,4 +64,5 @@ Initial release.
 - Atomic durable writes everywhere (temp → fsync → `os.replace` → dir
   fsync); zero runtime dependencies; 52 tests.
 
+[0.2.0]: https://github.com/liaomingxin/codex-swap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/liaomingxin/codex-swap/releases/tag/v0.1.0
