@@ -65,6 +65,7 @@ cxswap auto [--threshold N] [--strategy best|next]   # watch & switch (below)
 cxswap switch [NUM|EMAIL]     # rotate, or switch to a specific account
 cxswap remove NUM|EMAIL       # forget a stored account
 cxswap unclaimed              # parked unrecognized logins
+cxswap import-cockpit         # import accounts from Cockpit Tools
 cxswap purge [--yes]          # remove all codex-swap data
 ```
 
@@ -142,6 +143,28 @@ For cron, `--once` reports via its exit code (0 switched / 1 error /
 ```bash
 */5 * * * * cxswap auto --once --json >> ~/.cxswap-auto.log 2>&1
 ```
+
+## Importing from Cockpit Tools
+
+If you already manage Codex accounts with
+[Cockpit Tools](https://www.antigravity.io/) (the `~/.antigravity_cockpit`
+app), one command migrates them over:
+
+```bash
+uv tool install --editable '.[cockpit]'   # adds the decryption dependency
+cxswap import-cockpit
+```
+
+Accounts are decrypted locally (key file + AES-256-GCM, nothing leaves the
+machine) and stored as slots. **Newest-token-wins**: an account cxswap
+already knows is only updated when Cockpit's copy carries newer tokens, so
+importing can never resurrect an already-rotated refresh token.
+
+> Caveat: two managers sharing one account line means whichever refreshes a
+> token first supersedes the other's copy. After you start using an account
+> from cxswap (its token expires and gets rotated), Cockpit's stored copy of
+> that account will fail with `refresh_token_reused` until you re-import or
+> re-login there. One manager per account line is the steady state.
 
 ## Roadmap
 

@@ -23,6 +23,10 @@ classifiers = [
 # risks for a tool that sits next to your credentials.
 dependencies = []
 
+[project.optional-dependencies]
+# Only for `cxswap import-cockpit` (AES-256-GCM decryption of Cockpit's store)
+cockpit = ["cryptography>=42"]
+
 [project.urls]
 Repository = "https://github.com/liaomingxin/codex-swap"
 
@@ -39,6 +43,7 @@ packages = ["src/codex_swap"]
 
 [dependency-groups]
 dev = [
+    "cryptography>=50.0.1",
     "pytest>=8.0",
     "ruff>=0.16.5",
 ]

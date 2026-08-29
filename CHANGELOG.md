@@ -4,6 +4,19 @@ All notable changes to codex-swap are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `cxswap import-cockpit [--path DIR] [--json]`: import Codex accounts
+  from Antigravity Cockpit Tools' encrypted store (AES-256-GCM with the
+  local key file). Newest-token-wins: a slot's credentials are never
+  downgraded to an older copy. Needs the `cockpit` extra
+  (`uv tool install --editable '.[cockpit]'`).
+- Fixed identity parsing: JWT claims are now read from both the AUTH and
+  PROFILE namespaces (an `or`-chain shadowed the second when both were
+  present, e.g. emails in access tokens).
+
 ## [0.1.0] — 2026-08-29
 
 Initial release.

@@ -314,6 +314,29 @@ def _cmd_auto(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_import_cockpit(args: argparse.Namespace) -> int:
+    from codex_swap.cockpit import import_into_store, load_cockpit_accounts
+    from codex_swap.store import AccountStore
+
+    accounts = load_cockpit_accounts(args.path)
+    if not accounts:
+        _say(args, "No active Codex accounts found in Cockpit")
+        if args.json:
+            print(json.dumps({"schemaVersion": 1, "imported": [], "count": 0}))
+        return 0
+    report = import_into_store(AccountStore(), accounts)
+    for row in report:
+        note = {
+            "added": "stored as new slot",
+            "refreshed": "updated slot with newer tokens",
+            "kept-newer": "skipped — slot already holds newer tokens",
+        }[row["action"]]
+        _say(args, f"slot {row['slot']}  {row['email']}  ({note})")
+    if args.json:
+        print(json.dumps({"schemaVersion": 1, "imported": report, "count": len(report)}))
+    return 0
+
+
 def _cmd_purge(args: argparse.Namespace) -> int:
     if not args.yes:
         answer = input("Remove ALL codex-swap data (stored accounts)? [y/N] ").strip().lower()
@@ -409,6 +432,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true", help="Human mode: suppress per-tick lines")
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_auto)
+
+    p = sub.add_parser(
+        "import-cockpit",
+        help="Import Codex accounts from Antigravity Cockpit Tools' encrypted store",
+        description=(
+            "Decrypts ~/.antigravity_cockpit's active Codex accounts "
+            "(AES-256-GCM, local key file) and stores them as cxswap slots. "
+            "Never overwrites a slot's credentials with older tokens."
+        ),
+    )
+    p.add_argument(
+        "--path", metavar="DIR", help="Cockpit directory (default ~/.antigravity_cockpit)"
+    )
+    p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=_cmd_import_cockpit)
 
     p = sub.add_parser("purge", help="Remove all codex-swap data")
     p.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")

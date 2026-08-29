@@ -49,9 +49,12 @@ def _claim(payload: dict | None, name: str) -> object:
         return None
     if name in payload:
         return payload[name]
-    ns = payload.get(AUTH_NS) or payload.get(PROFILE_NS)
-    if isinstance(ns, dict):
-        return ns.get(name)
+    # both namespaces can coexist (real access_tokens carry AUTH + PROFILE);
+    # a plain `or` chain would shadow the second when the first is present
+    for ns_key in (AUTH_NS, PROFILE_NS):
+        ns = payload.get(ns_key)
+        if isinstance(ns, dict) and name in ns:
+            return ns[name]
     return None
 
 
