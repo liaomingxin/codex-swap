@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 
+from conftest import make_auth_json
+
+from codex_swap.exceptions import StoreError
 from codex_swap.identity import identity_from_auth
 from codex_swap.store import AccountStore
-from codex_swap.exceptions import StoreError
-
-from conftest import make_auth_json
 
 
 def _ident(email: str, account_id: str, refresh: str | None = None):
     return identity_from_auth(
-        json.loads(make_auth_json(email=email, account_id=account_id, refresh_token=refresh or f"rt.1.{email}"))
+        json.loads(
+            make_auth_json(
+                email=email, account_id=account_id, refresh_token=refresh or f"rt.1.{email}"
+            )
+        )
     )
 
 

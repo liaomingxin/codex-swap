@@ -80,11 +80,7 @@ class UsageSnapshot:
     @property
     def binding_percent(self) -> float:
         """The utilization number a switcher would act on (highest window)."""
-        pcts = [
-            w.used_percent
-            for w in (self.primary, self.secondary)
-            if w is not None
-        ]
+        pcts = [w.used_percent for w in (self.primary, self.secondary) if w is not None]
         return max(pcts) if pcts else 0.0
 
     def to_json(self) -> dict:
@@ -116,7 +112,7 @@ class UsageSnapshot:
         }
 
     @staticmethod
-    def from_json(data: dict) -> "UsageSnapshot":
+    def from_json(data: dict) -> UsageSnapshot:
         def win(w: dict | None) -> UsageWindow | None:
             if not w:
                 return None
@@ -182,8 +178,12 @@ def parse_usage(payload: dict, fetched_at: float | None = None) -> UsageSnapshot
             )
     return UsageSnapshot(
         email=payload.get("email") if isinstance(payload.get("email"), str) else None,
-        account_id=payload.get("account_id") if isinstance(payload.get("account_id"), str) else None,
-        plan_type=payload.get("plan_type") if isinstance(payload.get("plan_type"), str) else None,
+        account_id=payload.get("account_id")
+        if isinstance(payload.get("account_id"), str)
+        else None,
+        plan_type=payload.get("plan_type")
+        if isinstance(payload.get("plan_type"), str)
+        else None,
         primary=_parse_window(rate.get("primary_window")),
         secondary=_parse_window(rate.get("secondary_window")),
         model_limits=tuple(models),

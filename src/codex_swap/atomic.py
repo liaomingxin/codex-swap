@@ -9,6 +9,7 @@ on POSIX and Windows) -> fsync of the directory entry.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -33,9 +34,7 @@ def _fsync_dir(directory: Path) -> None:
 
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
@@ -44,10 +43,8 @@ def atomic_write_text(path: Path, text: str) -> None:
         os.replace(tmp_name, path)
         _fsync_dir(path.parent)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 

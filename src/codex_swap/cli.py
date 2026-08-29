@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from codex_swap import __version__
 from codex_swap.exceptions import CodexSwapError
@@ -36,7 +36,7 @@ def _fmt_exp(iso: str | None, expired: bool | None) -> str:
         dt = datetime.fromisoformat(iso)
     except ValueError:
         return iso
-    remaining = dt - datetime.now(timezone.utc)
+    remaining = dt - datetime.now(UTC)
     days = remaining.days if remaining.total_seconds() >= 0 else 0
     marker = " EXPIRED" if expired else ""
     return f"{days}d{marker}" if days else "expired"
@@ -45,8 +45,11 @@ def _fmt_exp(iso: str | None, expired: bool | None) -> str:
 def _cmd_add(args: argparse.Namespace) -> int:
     switcher = CodexAccountSwitcher()
     entry = switcher.add()
-    _say(args, f"Stored account {entry.number} ({entry.email or entry.account_id}"
-         f"{f', {entry.plan_type}' if entry.plan_type else ''})")
+    _say(
+        args,
+        f"Stored account {entry.number} ({entry.email or entry.account_id}"
+        f"{f', {entry.plan_type}' if entry.plan_type else ''})",
+    )
     if args.json:
         print(json.dumps({"added": True, **switcher._entry_ref(entry)}))
     return 0
@@ -129,7 +132,11 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     else:
         payload = switcher.list_payload()
         hit = next(
-            (r for r in payload["accounts"] if (r["email"] or "").lower() == args.target.lower()),
+            (
+                r
+                for r in payload["accounts"]
+                if (r["email"] or "").lower() == args.target.lower()
+            ),
             None,
         )
         if hit is None:
@@ -189,7 +196,10 @@ def _cmd_usage(args: argparse.Namespace) -> int:
     if not payload["accounts"]:
         _out("No accounts stored. Run `codex login`, then `cxswap add`.")
         return 0
-    _say(args, f"{'*':<2} {'#':<4} {'EMAIL':<30} {'PLAN':<6} {'WINDOW':<14} {'5H':<12} {'RESETS IN'}")
+    _say(
+        args,
+        f"{'*':<2} {'#':<4} {'EMAIL':<30} {'PLAN':<6} {'WINDOW':<14} {'5H':<12} {'RESETS IN'}",
+    )
     for row in payload["accounts"]:
         mark = "*" if row["active"] else " "
         usage = row.get("usage")
@@ -212,10 +222,18 @@ def _cmd_usage(args: argparse.Namespace) -> int:
             age = row.get("usageAgeSeconds")
             if status == "stale" and isinstance(age, (int, float)):
                 age_note = f"  · {age // 60}m ago"
-            _say(args, f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} {plan:<6} {window:<14} {five_hour:<12} {_fmt_reset(reset)}{age_note}")
+            _say(
+                args,
+                f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} "
+                f"{plan:<6} {window:<14} {five_hour:<12} {_fmt_reset(reset)}{age_note}",
+            )
             for m in usage.get("modelLimits", []):
                 name = (m.get("name") or "?")[:24]
-                _say(args, f"{'':>8}{name:<26} {_fmt_window(m.get('primaryWindow')):<14} {_fmt_window(m.get('secondaryWindow'))}")
+                _say(
+                    args,
+                    f"{'':>8}{name:<26} {_fmt_window(m.get('primaryWindow')):<14} "
+                    f"{_fmt_window(m.get('secondaryWindow'))}",
+                )
         else:
             plan = row.get("plan") or "-"
             note = {
@@ -223,7 +241,11 @@ def _cmd_usage(args: argparse.Namespace) -> int:
                 "stale": "no data yet",
                 "error": row.get("usageError", "unavailable"),
             }.get(status, "no data")
-            _say(args, f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} {plan:<6} {note}")
+            _say(
+                args,
+                f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} "
+                f"{plan:<6} {note}",
+            )
     return 0
 
 
@@ -231,14 +253,20 @@ def _fmt_event_human(event: dict) -> str:
     kind = event.get("event")
     slot = event.get("slot")
     if kind == "switch":
-        return (f"switched {event.get('from')} -> {event.get('to')} "
-                f"({event.get('email') or '?'}; {event.get('fromBindingPct', 0):.0f}% -> "
-                f"{event.get('toBindingPct', 0):.0f}%"
-                + (" [dry-run]" if event.get("dryRun") else "") + ")")
+        return (
+            f"switched {event.get('from')} -> {event.get('to')} "
+            f"({event.get('email') or '?'}; {event.get('fromBindingPct', 0):.0f}% -> "
+            f"{event.get('toBindingPct', 0):.0f}%"
+            + (" [dry-run]" if event.get("dryRun") else "")
+            + ")"
+        )
     if kind == "no-switch":
         reason = event.get("reason")
         detail = {
-            "below-threshold": f"active {slot} at {event.get('bindingPct', 0):.0f}% < {event.get('thresholdPct', 0):.0f}%",
+            "below-threshold": (
+                f"active {slot} at {event.get('bindingPct', 0):.0f}% "
+                f"< {event.get('thresholdPct', 0):.0f}%"
+            ),
             "cooldown": f"cooldown {event.get('cooldownRemainingS', 0):.0f}s remaining",
             "all-exhausted": "every account is at or over the threshold",
             "no-viable-candidate": "no candidate clears the hysteresis margin",
@@ -350,15 +378,34 @@ def build_parser() -> argparse.ArgumentParser:
             "a foreground loop, or --once from cron."
         ),
     )
-    p.add_argument("--threshold", type=float, default=80.0, metavar="PCT",
-                   help="Switch when the binding window reaches this percent (default 80)")
-    p.add_argument("--interval", type=float, default=60.0, metavar="SEC",
-                   help="Poll interval for the foreground loop (default 60s)")
-    p.add_argument("--strategy", choices=("best", "next"), default="best",
-                   help="best: most quota left (default); next: rotate 1->2->3")
-    p.add_argument("--once", action="store_true",
-                   help="Single check-and-switch, for cron/scripts (see exit codes)")
-    p.add_argument("--dry-run", action="store_true", help="Log what would happen, never switch")
+    p.add_argument(
+        "--threshold",
+        type=float,
+        default=80.0,
+        metavar="PCT",
+        help="Switch when the binding window reaches this percent (default 80)",
+    )
+    p.add_argument(
+        "--interval",
+        type=float,
+        default=60.0,
+        metavar="SEC",
+        help="Poll interval for the foreground loop (default 60s)",
+    )
+    p.add_argument(
+        "--strategy",
+        choices=("best", "next"),
+        default="best",
+        help="best: most quota left (default); next: rotate 1->2->3",
+    )
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="Single check-and-switch, for cron/scripts (see exit codes)",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="Log what would happen, never switch"
+    )
     p.add_argument("--quiet", action="store_true", help="Human mode: suppress per-tick lines")
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_auto)

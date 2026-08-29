@@ -38,7 +38,26 @@ build-backend = "hatchling.build"
 packages = ["src/codex_swap"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.16.5",
+]
+
+[tool.ruff]
+line-length = 95
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import order
+    "B",   # bugbear (likely-bug patterns)
+    "UP",  # modernize
+    "SIM", # simplify
+    "RUF", # ruff-specific
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

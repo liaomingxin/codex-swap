@@ -35,7 +35,9 @@ class UsageCache:
         return slots if isinstance(slots, dict) else {}
 
     def get(self, slot: int, *, max_age_s: float | None = SERVE_TTL_S) -> UsageSnapshot | None:
-        """The slot's cached snapshot, or None when absent/stale (max_age_s=None disables staleness)."""
+        """The slot's cached snapshot, or None when absent/stale.
+
+        ``max_age_s=None`` disables the staleness check."""
         row = self._load_slots().get(str(slot))
         if not isinstance(row, dict):
             return None

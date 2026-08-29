@@ -6,16 +6,13 @@ import io
 import json
 import time
 import urllib.error
-from pathlib import Path
 
-import pytest
+from conftest import make_access_token, make_auth_json
 
 from codex_swap import usage as usage_api
+from codex_swap.paths import auth_path
 from codex_swap.switcher import CodexAccountSwitcher
 from codex_swap.usage_store import UsageCache
-from codex_swap.paths import auth_path
-
-from conftest import make_auth_json, make_access_token
 
 # A response shaped like the real /wham/usage payload (captured 2026-08-29,
 # trimmed to the fields the parser reads).
@@ -86,11 +83,7 @@ class FakeOpener:
         self.requests.append(req)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, int):
-            body = (
-                {"error": {"code": outcome}}
-                if isinstance(outcome, str)
-                else {}
-            )
+            body = {"error": {"code": outcome}} if isinstance(outcome, str) else {}
             raise urllib.error.HTTPError(
                 req.full_url, outcome, "faked", {}, io.BytesIO(json.dumps(body).encode())
             )
@@ -133,7 +126,7 @@ def test_parse_usage_degrades_to_empty():
 
 def test_fetch_usage_sends_minimal_headers():
     opener = FakeOpener(REAL_SHAPED)
-    snap, raw = usage_api.fetch_usage("tok", "acc-1234", opener=opener)
+    _, raw = usage_api.fetch_usage("tok", "acc-1234", opener=opener)
     assert raw["plan_type"] == "pro"
     req = opener.requests[0]
     assert req.get_header("User-agent") == "codex-swap"
@@ -151,7 +144,9 @@ def test_fetch_usage_401_raises_auth_error():
 
 
 def test_refresh_tokens_posts_rotated_fields():
-    opener = FakeOpener({"access_token": "new-acc", "refresh_token": "new-rt", "id_token": "new-id"})
+    opener = FakeOpener(
+        {"access_token": "new-acc", "refresh_token": "new-rt", "id_token": "new-id"}
+    )
     payload = usage_api.refresh_tokens("old-rt", opener=opener)
     assert payload["refresh_token"] == "new-rt"
     req = opener.requests[0]
@@ -161,13 +156,15 @@ def test_refresh_tokens_posts_rotated_fields():
 
 
 def test_refresh_tokens_classifies_reuse():
-    opener = FakeOpener("reused_placeholder")  # string -> {"error":{"code": ...}}
     # craft the exact server shape for refresh_token_reused
     class ReuseOpener(FakeOpener):
         def __call__(self, req, timeout=None):
             self.requests.append(req)
             raise urllib.error.HTTPError(
-                req.full_url, 400, "faked", {},
+                req.full_url,
+                400,
+                "faked",
+                {},
                 io.BytesIO(json.dumps({"error": {"code": "refresh_token_reused"}}).encode()),
             )
 
@@ -185,8 +182,8 @@ def test_cache_ttl_and_stale_peek(tmp_path):
     cache = UsageCache()
     snap = usage_api.parse_usage(REAL_SHAPED, fetched_at=time.time() - 400)
     cache.put(1, snap)
-    assert cache.get(1) is None            # older than TTL
-    assert cache.peek(1) is not None       # but peekable for display
+    assert cache.get(1) is None  # older than TTL
+    assert cache.peek(1) is not None  # but peekable for display
 
 
 def test_cache_roundtrip_fresh(tmp_path):
@@ -202,11 +199,13 @@ def test_cache_roundtrip_fresh(tmp_path):
 
 def _login_and_add_two(switcher: CodexAccountSwitcher):
     auth_path().write_text(
-        make_auth_json(email="a@x.io", account_id="acc-a", refresh_token="rt.1.acc-a"), encoding="utf-8"
+        make_auth_json(email="a@x.io", account_id="acc-a", refresh_token="rt.1.acc-a"),
+        encoding="utf-8",
     )
     switcher.add()
     auth_path().write_text(
-        make_auth_json(email="b@x.io", account_id="acc-b", refresh_token="rt.1.acc-b"), encoding="utf-8"
+        make_auth_json(email="b@x.io", account_id="acc-b", refresh_token="rt.1.acc-b"),
+        encoding="utf-8",
     )
     switcher.add()
 
@@ -229,7 +228,12 @@ def test_usage_report_inactive_expired_token_refreshes_once(live_auth):
     # slot 1 (inactive) carries an expired access token
     entry1 = sw.store.find(1)
     expired_auth = json.loads(
-        make_auth_json(email="a@x.io", account_id="acc-a", access_exp=time.time() - 60, refresh_token="rt.1.acc-a")
+        make_auth_json(
+            email="a@x.io",
+            account_id="acc-a",
+            access_exp=time.time() - 60,
+            refresh_token="rt.1.acc-a",
+        )
     )
     sw.store.write_credential(entry1, json.dumps(expired_auth, indent=2))
 
@@ -250,6 +254,7 @@ def test_usage_report_inactive_expired_token_refreshes_once(live_auth):
     stored = json.loads(sw.store.read_credential(sw.store.find(1)))
     assert stored["tokens"]["refresh_token"] == "rt.1.rotated-by-uswap"
     from codex_swap.identity import identity_from_auth
+
     ident = identity_from_auth(stored)
     assert sw.store.find_by_identity(ident).number == 1
 
@@ -259,7 +264,12 @@ def test_usage_report_dead_refresh_token_marks_auth_needed(live_auth):
     _login_and_add_two(sw)
     entry1 = sw.store.find(1)
     expired_auth = json.loads(
-        make_auth_json(email="a@x.io", account_id="acc-a", access_exp=time.time() - 60, refresh_token="rt.1.acc-a")
+        make_auth_json(
+            email="a@x.io",
+            account_id="acc-a",
+            access_exp=time.time() - 60,
+            refresh_token="rt.1.acc-a",
+        )
     )
     sw.store.write_credential(entry1, json.dumps(expired_auth, indent=2))
 
@@ -270,10 +280,18 @@ def test_usage_report_dead_refresh_token_marks_auth_needed(live_auth):
             self.requests.append(req)
             if "oauth/token" in req.full_url:
                 raise urllib.error.HTTPError(
-                    req.full_url, 400, "faked", {},
-                    io.BytesIO(json.dumps({"error": {"code": "refresh_token_expired"}}).encode()),
+                    req.full_url,
+                    400,
+                    "faked",
+                    {},
+                    io.BytesIO(
+                        json.dumps({"error": {"code": "refresh_token_expired"}}).encode()
+                    ),
                 )
-            if "wham/usage" in req.full_url and req.get_header("Chatgpt-account-id") == "acc-a":
+            if (
+                "wham/usage" in req.full_url
+                and req.get_header("Chatgpt-account-id") == "acc-a"
+            ):
                 raise urllib.error.HTTPError(req.full_url, 401, "faked", {}, io.BytesIO(b"{}"))
             return FakeResponse(dict(REAL_SHAPED, account_id="acc-a"))
 
@@ -305,5 +323,5 @@ def test_usage_report_stale_on_error(live_auth):
 
     report = sw.usage_report(force=True, opener=DownOpener())
     for row in report["accounts"]:
-        assert row["usageStatus"] == "stale"       # last-good kept, marked
-        assert row["usage"]["planType"] == "pro"   # data survives the outage
+        assert row["usageStatus"] == "stale"  # last-good kept, marked
+        assert row["usage"]["planType"] == "pro"  # data survives the outage

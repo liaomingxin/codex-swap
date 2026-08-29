@@ -23,13 +23,12 @@ across processes.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from codex_swap.atomic import atomic_write_json, read_json
 from codex_swap.paths import backup_root
 from codex_swap.switcher import CodexAccountSwitcher
-from codex_swap.usage_store import UsageCache
 
 STATE_FILENAME = "autoswitch_state.json"
 STATE_SCHEMA_VERSION = 1
@@ -123,7 +122,7 @@ class AutoSwitchEngine:
         cfg = self.config
         try:
             report = self.switcher.usage_report(opener=self.opener)
-        except Exception as e:  # noqa: BLE001 - engine never crashes the loop
+        except Exception as e:
             return self._emit("error", message=f"usage report failed: {e}")
 
         rows = report["accounts"]
@@ -131,23 +130,32 @@ class AutoSwitchEngine:
         if not rows:
             return self._emit("no-switch", reason="no-accounts")
         if not active_rows:
-            return self._emit("no-switch", reason="unmanaged-active",
-                              hint="run `cxswap add` to manage the live login")
+            return self._emit(
+                "no-switch",
+                reason="unmanaged-active",
+                hint="run `cxswap add` to manage the live login",
+            )
 
         active = active_rows[0]
         if active.get("usageStatus") in ("auth-needed", "error") or not active.get("usage"):
             # Fail safe: no trustworthy numbers for the active account —
             # hold rather than switch on a guess.
-            return self._emit("no-switch", reason="active-usage-unavailable",
-                              slot=active["number"])
+            return self._emit(
+                "no-switch", reason="active-usage-unavailable", slot=active["number"]
+            )
 
         binding = _binding_pct(active)
         if binding is None:
-            return self._emit("no-switch", reason="active-usage-unavailable", slot=active["number"])
+            return self._emit(
+                "no-switch", reason="active-usage-unavailable", slot=active["number"]
+            )
         if binding < cfg.threshold_pct:
             return self._emit(
-                "no-switch", reason="below-threshold",
-                slot=active["number"], bindingPct=binding, thresholdPct=cfg.threshold_pct,
+                "no-switch",
+                reason="below-threshold",
+                slot=active["number"],
+                bindingPct=binding,
+                thresholdPct=cfg.threshold_pct,
             )
 
         # Cooldown — bypassed only when the account is hard at its limit.
@@ -158,8 +166,10 @@ class AutoSwitchEngine:
             remaining = cfg.cooldown_s - (self.now() - last)
             if remaining > 0:
                 return self._emit(
-                    "no-switch", reason="cooldown",
-                    slot=active["number"], bindingPct=binding,
+                    "no-switch",
+                    reason="cooldown",
+                    slot=active["number"],
+                    bindingPct=binding,
                     cooldownRemainingS=round(remaining),
                 )
 
@@ -176,13 +186,17 @@ class AutoSwitchEngine:
 
         if not candidates:
             above = sum(
-                1 for r in rows
+                1
+                for r in rows
                 if (b := _binding_pct(r)) is not None and b >= cfg.threshold_pct
             )
             reason = "all-exhausted" if above >= len(rows) else "no-viable-candidate"
             return self._emit(
-                "no-switch", reason=reason,
-                slot=active["number"], bindingPct=binding, thresholdPct=cfg.threshold_pct,
+                "no-switch",
+                reason=reason,
+                slot=active["number"],
+                bindingPct=binding,
+                thresholdPct=cfg.threshold_pct,
             )
 
         if cfg.strategy == "next":
@@ -198,26 +212,31 @@ class AutoSwitchEngine:
             return self._emit(
                 "switch",
                 **{"from": active["number"], "fromBindingPct": binding},
-                to=target_row["number"], toBindingPct=target_pct,
-                email=target_row.get("email"), dryRun=True,
+                to=target_row["number"],
+                toBindingPct=target_pct,
+                email=target_row.get("email"),
+                dryRun=True,
             )
 
         try:
             result = self.switcher.switch(str(target_row["number"]))
-        except Exception as e:  # noqa: BLE001 - a broken slot must not kill the loop
+        except Exception as e:
             return self._emit(
                 "error", message=f"switch to slot {target_row['number']} failed: {e}"
             )
         if not result.get("switched"):
             return self._emit(
-                "no-switch", reason="switch-refused",
-                slot=active["number"], detail=result,
+                "no-switch",
+                reason="switch-refused",
+                slot=active["number"],
+                detail=result,
             )
         self._record_switch(active["number"], target_row["number"])
         return self._emit(
             "switch",
             **{"from": active["number"], "fromBindingPct": binding},
-            to=target_row["number"], toBindingPct=target_pct,
+            to=target_row["number"],
+            toBindingPct=target_pct,
             email=target_row.get("email"),
         )
 

@@ -15,15 +15,15 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from codex_swap import usage as usage_api
 from codex_swap.atomic import atomic_write_text
+from codex_swap.exceptions import AccountNotFoundError, AuthFileError, SwitchError
 from codex_swap.identity import AccountIdentity, identity_from_auth
 from codex_swap.paths import auth_path, backup_root, unclaimed_dir
 from codex_swap.store import AccountStore, SlotEntry
 from codex_swap.usage_store import UsageCache
-from codex_swap.exceptions import AccountNotFoundError, AuthFileError, SwitchError
 
 # Politeness stagger between per-slot usage fetches in one pass — N slots
 # never burst the shared endpoint from one IP in the same instant (same
@@ -46,9 +46,7 @@ class CodexAccountSwitcher:
         try:
             text = auth_path().read_text(encoding="utf-8")
         except FileNotFoundError as e:
-            raise AuthFileError(
-                "No auth.json in CODEX_HOME — run `codex login` first"
-            ) from e
+            raise AuthFileError("No auth.json in CODEX_HOME — run `codex login` first") from e
         except OSError as e:
             raise AuthFileError(f"Cannot read {auth_path()}: {e}") from e
         try:
@@ -127,9 +125,7 @@ class CodexAccountSwitcher:
                 if hit is not None:
                     return hit
             needle = target.lower()
-            hit = next(
-                (e for e in entries if (e.email or "").lower() == needle), None
-            )
+            hit = next((e for e in entries if (e.email or "").lower() == needle), None)
             if hit is not None:
                 return hit
             raise AccountNotFoundError(f"No account matches '{target}'")
@@ -170,7 +166,9 @@ class CodexAccountSwitcher:
                 self.store.upsert(live_identity)
             else:
                 path = self.store.stash_unclaimed(live_text, live_identity.refresh_fingerprint)
-                stash_note = f"unrecognized login parked at {path} (`cxswap add` it, or drop it)"
+                stash_note = (
+                    f"unrecognized login parked at {path} (`cxswap add` it, or drop it)"
+                )
 
         credentials_text = self.store.read_credential(entry)
         try:
@@ -237,7 +235,7 @@ class CodexAccountSwitcher:
         if isinstance(payload.get("id_token"), str):
             new_tokens["id_token"] = payload["id_token"]
         auth["tokens"] = new_tokens
-        auth["last_refresh"] = datetime.now(timezone.utc).isoformat()
+        auth["last_refresh"] = datetime.now(UTC).isoformat()
 
         text = json.dumps(auth, indent=2) + "\n"
         identity = identity_from_auth(auth)
@@ -303,13 +301,18 @@ class CodexAccountSwitcher:
                     row["usageStatus"] = "auth-needed"
                 except usage_api.RefreshError as e:
                     row["usageStatus"] = (
-                        "auth-needed" if e.kind in (
-                            "refresh_token_expired", "refresh_token_reused",
-                            "refresh_token_invalidated", "no-refresh-token",
-                        ) else "error"
+                        "auth-needed"
+                        if e.kind
+                        in (
+                            "refresh_token_expired",
+                            "refresh_token_reused",
+                            "refresh_token_invalidated",
+                            "no-refresh-token",
+                        )
+                        else "error"
                     )
                     row["usageError"] = str(e)
-                except (AuthFileError, Exception) as e:  # noqa: BLE001 - report, don't crash
+                except (AuthFileError, Exception) as e:
                     row["usageStatus"] = "error"
                     row["usageError"] = str(e)
             else:
@@ -324,7 +327,11 @@ class CodexAccountSwitcher:
                 age = time.time() - snapshot.fetched_at
                 row["usageAgeSeconds"] = round(age)
             rows.append(row)
-        return {"schemaVersion": 1, "activeAccountNumber": active.number if active else None, "accounts": rows}
+        return {
+            "schemaVersion": 1,
+            "activeAccountNumber": active.number if active else None,
+            "accounts": rows,
+        }
 
     # ------------------------------------------------------------- unclaimed
 
@@ -343,9 +350,7 @@ class CodexAccountSwitcher:
                     "file": path.name,
                     "email": identity.email if identity else None,
                     "fingerprint": identity.refresh_fingerprint[:16] if identity else None,
-                    "mtime": datetime.fromtimestamp(
-                        path.stat().st_mtime, tz=timezone.utc
-                    ).isoformat(),
+                    "mtime": datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
                 }
             )
         return out

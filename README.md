@@ -4,6 +4,25 @@ Multi-account switcher for the [OpenAI Codex CLI](https://github.com/openai/code
 Store several ChatGPT logins, switch between them with one command — no
 browser re-login, no token juggling.
 
+## Installation
+
+From a checkout (until the first PyPI release):
+
+```bash
+git clone https://github.com/liaomingxin/codex-swap.git
+cd codex-swap
+uv tool install --editable .    # `cxswap` on PATH, live-reloads your edits
+```
+
+Or run straight from the checkout without installing:
+
+```bash
+uv sync
+uv run cxswap --help
+```
+
+Requires Python 3.12+ and the Codex CLI installed and logged in once.
+
 ```
 codex login            # log in with account #1 (browser)
 cxswap add             # capture it
@@ -135,10 +154,28 @@ For cron, `--once` reports via its exit code (0 switched / 1 error /
 ## Development
 
 ```bash
-uv sync
-uv run pytest
-uv run cxswap --help
+uv sync                 # dev deps (pytest, ruff) from the lockfile
+uv run pytest           # 52 tests, fully isolated (env-var tmp homes)
+uv run ruff check src tests && uv run ruff format --check src tests
+uv run cxswap --help    # run from the checkout
 ```
+
+No test touches real state: `CODEX_HOME` and `CODEX_SWAP_BACKUP` are
+redirected per-test via env vars (the same knobs documented above), and
+the HTTP layer is injectable (`opener=`) so no test hits the network.
+
+### Iteration flow
+
+- `main` is always green: CI runs lint + tests on Linux/macOS/Windows.
+- Feature work happens on `feat/<topic>` branches, merged to `main` via
+  PR (or fast-forward push for solo work) once CI is green.
+- Releases: bump `version` in `pyproject.toml`, update `CHANGELOG.md`,
+  commit as `release: vX.Y.Z`, tag `vX.Y.Z`, push the tag.
+- Changes worth a changelog entry: anything user-visible (commands,
+  flags, JSON schema, storage layout) — internal refactors don't need one.
+- JSON payloads are additive-only (`schemaVersion: 1`): new fields may
+  appear, existing fields never change meaning — scripts must ignore
+  unknown keys.
 
 ## License
 

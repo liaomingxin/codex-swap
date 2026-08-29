@@ -19,15 +19,16 @@ hard way in claude-swap (#218/#237 lineage).
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from codex_swap.atomic import atomic_write_json, atomic_write_text, read_json
+from codex_swap.exceptions import StoreError
 from codex_swap.identity import AccountIdentity
 from codex_swap.paths import credentials_dir, sequence_path, unclaimed_dir
-from codex_swap.exceptions import StoreError
 
 SCHEMA_VERSION = 1
 
@@ -106,19 +107,13 @@ class AccountStore:
         Fingerprints diverge after a refresh-token rotation the slot never saw;
         account_id survives that, so it is the fallback, not the primary."""
         entries = self.list_entries()
-        by_fp = {
-            e.refresh_fingerprint
-            for e in entries
-            if e.refresh_fingerprint
-        }
+        by_fp = {e.refresh_fingerprint for e in entries if e.refresh_fingerprint}
         if identity.refresh_fingerprint in by_fp:
             return next(
                 e for e in entries if e.refresh_fingerprint == identity.refresh_fingerprint
             )
         if identity.account_id:
-            return next(
-                (e for e in entries if e.account_id == identity.account_id), None
-            )
+            return next((e for e in entries if e.account_id == identity.account_id), None)
         return None
 
     def upsert(self, identity: AccountIdentity) -> tuple[SlotEntry, bool]:
@@ -166,10 +161,8 @@ class AccountStore:
         del accounts[str(number)]
         self._save(accounts)
         path = entry.credential_path()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             path.unlink()
-        except FileNotFoundError:
-            pass
         return entry
 
     def write_credential(self, entry: SlotEntry, credentials_text: str) -> None:
@@ -179,9 +172,7 @@ class AccountStore:
         try:
             return entry.credential_path().read_text(encoding="utf-8")
         except OSError as e:
-            raise StoreError(
-                f"Credentials for slot {entry.number} are unreadable: {e}"
-            ) from e
+            raise StoreError(f"Credentials for slot {entry.number} are unreadable: {e}") from e
 
     def stash_unclaimed(self, credentials_text: str, fingerprint: str) -> Path:
         """Park an unrecognized live login instead of destroying it.

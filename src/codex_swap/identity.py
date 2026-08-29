@@ -22,7 +22,7 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 AUTH_NS = "https://api.openai.com/auth"
 PROFILE_NS = "https://api.openai.com/profile"
@@ -59,7 +59,7 @@ def _exp_datetime(payload: dict | None) -> datetime | None:
     exp = payload.get("exp") if payload else None
     if not isinstance(exp, (int, float)):
         return None
-    return datetime.fromtimestamp(exp, tz=timezone.utc)
+    return datetime.fromtimestamp(exp, tz=UTC)
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,5 @@ def identity_from_auth(auth: dict) -> AccountIdentity | None:
         access_expires_at=access_exp,
         id_expires_at=_exp_datetime(id_payload),
         refresh_fingerprint=fingerprint,
-        access_expired=access_exp is not None
-        and access_exp < datetime.now(timezone.utc),
+        access_expired=access_exp is not None and access_exp < datetime.now(UTC),
     )

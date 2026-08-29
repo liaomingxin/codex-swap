@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import time
 
-from codex_swap.identity import identity_from_auth, jwt_payload
-
 from conftest import make_auth_json
+
+from codex_swap.identity import identity_from_auth, jwt_payload
 
 
 def _auth(text: str):
@@ -16,7 +16,9 @@ def _auth(text: str):
 
 
 def test_parses_real_shaped_claims():
-    identity = identity_from_auth(_auth(make_auth_json(email="a@b.c", account_id="acc-9", plan="plus")))
+    identity = identity_from_auth(
+        _auth(make_auth_json(email="a@b.c", account_id="acc-9", plan="plus"))
+    )
     assert identity is not None
     assert identity.email == "a@b.c"
     assert identity.account_id == "acc-9"
@@ -41,7 +43,9 @@ def test_malformed_tokens_rejected():
 
 
 def test_unidentifiable_file_is_none():
-    assert identity_from_auth({"tokens": {"id_token": "x.y.z", "access_token": "x.y.z"}}) is None
+    assert (
+        identity_from_auth({"tokens": {"id_token": "x.y.z", "access_token": "x.y.z"}}) is None
+    )
     assert identity_from_auth({}) is None
     assert identity_from_auth({"tokens": "nope"}) is None
 

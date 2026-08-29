@@ -5,16 +5,18 @@ from __future__ import annotations
 import json
 import time
 
+from conftest import make_auth_json
+
+from codex_swap.exceptions import AuthFileError
 from codex_swap.paths import auth_path
 from codex_swap.switcher import CodexAccountSwitcher
-from codex_swap.exceptions import AuthFileError
-
-from conftest import make_auth_json
 
 
 def _login(email: str, account_id: str, refresh: str | None = None) -> None:
     auth_path().write_text(
-        make_auth_json(email=email, account_id=account_id, refresh_token=refresh or f"rt.1.{email}"),
+        make_auth_json(
+            email=email, account_id=account_id, refresh_token=refresh or f"rt.1.{email}"
+        ),
         encoding="utf-8",
     )
 
@@ -84,16 +86,16 @@ def test_rotation_wraps(live_auth):
 def test_switch_away_stashes_refreshed_tokens(live_auth):
     """The core safety property: a newer live token is never lost on switch."""
     sw = CodexAccountSwitcher()
-    sw.add()                                  # slot 1: user@example.com
+    sw.add()  # slot 1: user@example.com
     _login("second@x.io", "acc-second")
-    sw.add()                                  # slot 2: second@x.io
-    sw.switch("1")                            # slot 1 now live (original bytes)
+    sw.add()  # slot 2: second@x.io
+    sw.switch("1")  # slot 1 now live (original bytes)
 
     # simulate codex refreshing the live login while it is active
     _login("user@example.com", "acc-1234", refresh="rt.1.ROTATED-LIVE")
     rotated_live = auth_path().read_text()
 
-    result = sw.switch("2")                    # switch away: slot 1 must capture the rotation
+    result = sw.switch("2")  # switch away: slot 1 must capture the rotation
     assert result["switched"] is True
     entries = {e.number: e for e in sw.store.list_entries()}
     assert sw.store.read_credential(entries[1]) == rotated_live
