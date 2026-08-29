@@ -227,6 +227,65 @@ def _cmd_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_event_human(event: dict) -> str:
+    kind = event.get("event")
+    slot = event.get("slot")
+    if kind == "switch":
+        return (f"switched {event.get('from')} -> {event.get('to')} "
+                f"({event.get('email') or '?'}; {event.get('fromBindingPct', 0):.0f}% -> "
+                f"{event.get('toBindingPct', 0):.0f}%"
+                + (" [dry-run]" if event.get("dryRun") else "") + ")")
+    if kind == "no-switch":
+        reason = event.get("reason")
+        detail = {
+            "below-threshold": f"active {slot} at {event.get('bindingPct', 0):.0f}% < {event.get('thresholdPct', 0):.0f}%",
+            "cooldown": f"cooldown {event.get('cooldownRemainingS', 0):.0f}s remaining",
+            "all-exhausted": "every account is at or over the threshold",
+            "no-viable-candidate": "no candidate clears the hysteresis margin",
+            "active-usage-unavailable": f"active {slot} usage unavailable — holding",
+            "unmanaged-active": (event.get("hint") or "unmanaged active login"),
+            "no-accounts": "no accounts stored",
+            "switch-refused": "switch refused",
+        }.get(reason, reason or "")
+        return f"staying ({detail})"
+    if kind == "error":
+        return f"error: {event.get('message')}"
+    return str(event)
+
+
+def _cmd_auto(args: argparse.Namespace) -> int:
+    from codex_swap.engine import AutoConfig, AutoSwitchEngine
+
+    config = AutoConfig(
+        threshold_pct=args.threshold,
+        interval_s=args.interval,
+        strategy=args.strategy,
+    )
+
+    def emit(event: dict) -> None:
+        if args.json:
+            print(json.dumps({"schemaVersion": 1, **event}), flush=True)
+        elif not args.quiet:
+            stamp = time.strftime("%H:%M:%S")
+            _say(args, f"{stamp}  {_fmt_event_human(event)}")
+
+    engine = AutoSwitchEngine(CodexAccountSwitcher(), config, on_event=emit)
+    try:
+        event = engine.run(once=args.once, dry_run=args.dry_run)
+    except CodexSwapError as e:
+        _out(f"Error: {e}")
+        return 1
+    if args.once:
+        # claude-swap parity: 0 switched, 1 error, 2 nothing to do, 3 blocked
+        if event["event"] == "error":
+            return 1
+        if event["event"] == "switch":
+            return 0
+        reason = event.get("reason")
+        return 3 if reason in ("cooldown", "all-exhausted", "no-viable-candidate") else 2
+    return 0
+
+
 def _cmd_purge(args: argparse.Namespace) -> int:
     if not args.yes:
         answer = input("Remove ALL codex-swap data (stored accounts)? [y/N] ").strip().lower()
@@ -281,6 +340,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--refresh", action="store_true", help="Bypass the 5-minute cache")
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_usage)
+
+    p = sub.add_parser(
+        "auto",
+        help="Watch usage and switch before the active account hits its limit",
+        description=(
+            "Polls the usage cache and, when the active account's highest window "
+            "crosses the threshold, switches to a healthier account. Run bare for "
+            "a foreground loop, or --once from cron."
+        ),
+    )
+    p.add_argument("--threshold", type=float, default=80.0, metavar="PCT",
+                   help="Switch when the binding window reaches this percent (default 80)")
+    p.add_argument("--interval", type=float, default=60.0, metavar="SEC",
+                   help="Poll interval for the foreground loop (default 60s)")
+    p.add_argument("--strategy", choices=("best", "next"), default="best",
+                   help="best: most quota left (default); next: rotate 1->2->3")
+    p.add_argument("--once", action="store_true",
+                   help="Single check-and-switch, for cron/scripts (see exit codes)")
+    p.add_argument("--dry-run", action="store_true", help="Log what would happen, never switch")
+    p.add_argument("--quiet", action="store_true", help="Human mode: suppress per-tick lines")
+    p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=_cmd_auto)
 
     p = sub.add_parser("purge", help="Remove all codex-swap data")
     p.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")

@@ -42,6 +42,7 @@ cxswap add                    # store the current codex login
 cxswap list [--json]          # all accounts, active marker, token expiry
 cxswap status [--json]        # which account is active right now
 cxswap usage [--refresh] [--json]   # per-account rate limits (weekly + 5h)
+cxswap auto [--threshold N] [--strategy best|next]   # watch & switch (below)
 cxswap switch [NUM|EMAIL]     # rotate, or switch to a specific account
 cxswap remove NUM|EMAIL       # forget a stored account
 cxswap unclaimed              # parked unrecognized logins
@@ -95,12 +96,39 @@ rotates the live file out-of-band):
 Results are cached per slot for 5 minutes (`--refresh` bypasses); a failed
 fetch serves the last-good snapshot marked `stale` with its age.
 
+## Automatic switching
+
+```bash
+cxswap auto                       # foreground loop, polls every 60s
+cxswap auto --threshold 70        # switch earlier (default 80)
+cxswap auto --strategy next       # rotate 1 -> 2 -> 3 instead of best-quota
+cxswap auto --once                # single check, for cron
+.cxswap auto --dry-run             # log what it would do, never switch
+```
+
+When the active account's **binding window** — the highest utilization
+across its account-level and per-model windows — crosses the threshold, the
+engine switches to a candidate below it, *before* the limit hits (a running
+codex picks the new login up on its next message). Policy ported from
+claude-swap's UI-agnostic engine: hysteresis margin stops two accounts
+ping-ponging at the line, a 5-minute cooldown bounds the switch rate
+(bypassed only when the active account is hard at its limit), usage comes
+from the shared 5-minute cache so the poll loop stays cheap, and missing
+usage means *hold*, never switch on a guess. The cooldown persists across
+processes (`autoswitch_state.json`), so cron-driven `--once` ticks behave.
+
+For cron, `--once` reports via its exit code (0 switched / 1 error /
+2 nothing to do / 3 blocked) and `--json` emits one event per line:
+
+```bash
+*/5 * * * * cxswap auto --once --json >> ~/.cxswap-auto.log 2>&1
+```
+
 ## Roadmap
 
 - [x] Usage dashboard (`wham/usage`, weekly + 5h windows, per-model limits)
+- [x] `cxswap auto` — threshold/hysteresis/cooldown engine (best + next strategies)
 - [ ] `cxswap run N` — per-terminal account via per-profile `CODEX_HOME`
-- [ ] `cxswap auto` — threshold-based auto switching (engine design ports
-      from claude-swap's UI-agnostic `autoswitch.py`)
 - [ ] `add-token` for long-lived setup tokens / API keys
 - [ ] Export/import between machines
 
