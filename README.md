@@ -41,6 +41,7 @@ no API calls are ever made.
 cxswap add                    # store the current codex login
 cxswap list [--json]          # all accounts, active marker, token expiry
 cxswap status [--json]        # which account is active right now
+cxswap usage [--refresh] [--json]   # per-account rate limits (weekly + 5h)
 cxswap switch [NUM|EMAIL]     # rotate, or switch to a specific account
 cxswap remove NUM|EMAIL       # forget a stored account
 cxswap unclaimed              # parked unrecognized logins
@@ -73,10 +74,31 @@ Removing or purging never touches the live `auth.json` — you stay logged in.
 - **The live file is the source of truth.** Slot copies are refreshed from it
   on every switch away; stale snapshots are never installed over newer bytes.
 
+## Usage dashboard
+
+`cxswap usage` reads `GET https://chatgpt.com/backend-api/wham/usage` per
+account — the same endpoint the Codex TUI's rate-limit bar uses (plain
+headers, no client impersonation). Windows: an account-level weekly
+budget plus per-model 5h/7d limits (`additional_rate_limits`).
+
+Token policy per slot (the [openusage](https://github.com/robinebers/openusage)
+#516 lesson, adapted — refresh tokens are single-use and the codex CLI
+rotates the live file out-of-band):
+
+- the **active** slot is measured with the live `auth.json`'s token; we
+  never refresh the live file ourselves (the codex CLI owns it);
+- **inactive** slots are measured with their stored copy, refreshed by us
+  when the ~10-day access token has expired — safe because codex-swap is
+  the sole writer of those files. A dead refresh token marks the row
+  `auth-needed` instead of failing the report.
+
+Results are cached per slot for 5 minutes (`--refresh` bypasses); a failed
+fetch serves the last-good snapshot marked `stale` with its age.
+
 ## Roadmap
 
+- [x] Usage dashboard (`wham/usage`, weekly + 5h windows, per-model limits)
 - [ ] `cxswap run N` — per-terminal account via per-profile `CODEX_HOME`
-- [ ] Usage dashboard (`chatgpt.com/backend-api/api/codex/usage`)
 - [ ] `cxswap auto` — threshold-based auto switching (engine design ports
       from claude-swap's UI-agnostic `autoswitch.py`)
 - [ ] `add-token` for long-lived setup tokens / API keys

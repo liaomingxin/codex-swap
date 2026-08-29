@@ -14,13 +14,21 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime, timezone
 
+from codex_swap import usage as usage_api
 from codex_swap.atomic import atomic_write_text
 from codex_swap.identity import AccountIdentity, identity_from_auth
 from codex_swap.paths import auth_path, backup_root, unclaimed_dir
 from codex_swap.store import AccountStore, SlotEntry
+from codex_swap.usage_store import UsageCache
 from codex_swap.exceptions import AccountNotFoundError, AuthFileError, SwitchError
+
+# Politeness stagger between per-slot usage fetches in one pass — N slots
+# never burst the shared endpoint from one IP in the same instant (same
+# hygiene as claude-swap's _FETCH_STAGGER_S).
+_FETCH_STAGGER_S = 0.25
 
 
 class CodexAccountSwitcher:
@@ -201,6 +209,122 @@ class CodexAccountSwitcher:
         root = backup_root()
         if root.exists():
             shutil.rmtree(root)
+
+    # ----------------------------------------------------------------- usage
+
+    def _slot_auth_dict(self, entry: SlotEntry) -> dict:
+        return json.loads(self.store.read_credential(entry))
+
+    def _refresh_slot_credential(self, entry: SlotEntry, opener=None) -> dict:
+        """Rotate an inactive slot's tokens in place and persist them.
+
+        Safe by construction for *inactive* slots: codex-swap is their only
+        writer, so a refresh here can never race the codex CLI (the live
+        auth.json is never refreshed by us — see usage_report). The rotated
+        refresh token is persisted before anything else happens, and the
+        slot's lineage fingerprint is updated so find_by_identity keeps
+        matching after the rotation."""
+        auth = self._slot_auth_dict(entry)
+        tokens = auth.get("tokens") or {}
+        refresh_token = tokens.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise usage_api.RefreshError("no-refresh-token", 0)
+        payload = usage_api.refresh_tokens(refresh_token, opener=opener)
+        new_tokens = dict(tokens)
+        new_tokens["access_token"] = payload["access_token"]
+        if isinstance(payload.get("refresh_token"), str):
+            new_tokens["refresh_token"] = payload["refresh_token"]
+        if isinstance(payload.get("id_token"), str):
+            new_tokens["id_token"] = payload["id_token"]
+        auth["tokens"] = new_tokens
+        auth["last_refresh"] = datetime.now(timezone.utc).isoformat()
+
+        text = json.dumps(auth, indent=2) + "\n"
+        identity = identity_from_auth(auth)
+        if identity is not None:
+            updated, _ = self.store.upsert(identity)
+            self.store.write_credential(updated, text)
+        else:  # pragma: no cover - defensive: refresh returned a usable token
+            self.store.write_credential(entry, text)
+        return auth
+
+    def usage_report(self, *, force: bool = False, opener=None) -> dict:
+        """Usage rows for every slot, fetched under a serve-TTL cache.
+
+        Token policy per slot (the openusage #516 lesson, adapted):
+        - the ACTIVE slot is measured with the live auth.json's token — the
+          codex CLI owns refreshing it, and its bytes are the freshest copy
+          by construction. We never refresh the live file ourselves.
+        - INACTIVE slots are measured with their stored copy; an expired
+          access token triggers one refresh-and-retry (we are the sole
+          writer of those files, so rotation is race-free). A dead refresh
+          token marks the row auth-needed instead of failing the report."""
+        cache = UsageCache()
+        active = self.active_slot()
+        rows = []
+        first_fetch = True
+        for entry in self.store.list_entries():
+            row = {
+                "number": entry.number,
+                "email": entry.email,
+                "plan": entry.plan_type,
+                "active": active is not None and entry.number == active.number,
+            }
+            snapshot = None if force else cache.get(entry.number)
+            if snapshot is None:
+                if not first_fetch:
+                    time.sleep(_FETCH_STAGGER_S)
+                first_fetch = False
+                try:
+                    if row["active"]:
+                        live_text, _ = self.read_live()
+                        auth_dict = json.loads(live_text)
+                    else:
+                        auth_dict = self._slot_auth_dict(entry)
+                    tokens = auth_dict.get("tokens") or {}
+                    access = tokens.get("access_token")
+                    if not isinstance(access, str) or not access:
+                        raise usage_api.UsageAuthError("slot has no access token")
+                    try:
+                        snapshot, _ = usage_api.fetch_usage(
+                            access, tokens.get("account_id"), opener=opener
+                        )
+                    except usage_api.UsageAuthError:
+                        if row["active"]:
+                            raise  # live token rejected: codex will refresh on next use
+                        auth_dict = self._refresh_slot_credential(entry, opener=opener)
+                        tokens = auth_dict.get("tokens") or {}
+                        snapshot, _ = usage_api.fetch_usage(
+                            tokens["access_token"], tokens.get("account_id"), opener=opener
+                        )
+                    cache.put(entry.number, snapshot)
+                    row["usageStatus"] = "ok"
+                except usage_api.UsageAuthError:
+                    row["usageStatus"] = "auth-needed"
+                except usage_api.RefreshError as e:
+                    row["usageStatus"] = (
+                        "auth-needed" if e.kind in (
+                            "refresh_token_expired", "refresh_token_reused",
+                            "refresh_token_invalidated", "no-refresh-token",
+                        ) else "error"
+                    )
+                    row["usageError"] = str(e)
+                except (AuthFileError, Exception) as e:  # noqa: BLE001 - report, don't crash
+                    row["usageStatus"] = "error"
+                    row["usageError"] = str(e)
+            else:
+                row["usageStatus"] = "ok"
+            if snapshot is None:
+                stale = cache.peek(entry.number)
+                if stale is not None:
+                    snapshot = stale
+                    row["usageStatus"] = "stale"
+            if snapshot is not None:
+                row["usage"] = snapshot.to_json()
+                age = time.time() - snapshot.fetched_at
+                row["usageAgeSeconds"] = round(age)
+            rows.append(row)
+        return {"schemaVersion": 1, "activeAccountNumber": active.number if active else None, "accounts": rows}
 
     # ------------------------------------------------------------- unclaimed
 
