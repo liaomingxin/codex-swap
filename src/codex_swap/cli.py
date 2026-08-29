@@ -435,15 +435,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "import-cockpit",
-        help="Import Codex accounts from Antigravity Cockpit Tools' encrypted store",
+        help="Import Codex accounts from Cockpit Tools (encrypted store or export file)",
         description=(
-            "Decrypts ~/.antigravity_cockpit's active Codex accounts "
-            "(AES-256-GCM, local key file) and stores them as cxswap slots. "
-            "Never overwrites a slot's credentials with older tokens."
+            "Imports Codex accounts as cxswap slots, newest-token-wins. "
+            "Default source: ~/.antigravity_cockpit's encrypted store "
+            "(AES-256-GCM, local key file). With --file: a Cockpit UI export "
+            "(plaintext JSON, no key needed, may come from another machine)."
         ),
     )
     p.add_argument(
         "--path", metavar="DIR", help="Cockpit directory (default ~/.antigravity_cockpit)"
+    )
+    p.add_argument(
+        "--file", metavar="JSON",
+        help="Import a Cockpit UI export file instead of the local store",
     )
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=_cmd_import_cockpit)

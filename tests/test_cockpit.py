@@ -17,6 +17,7 @@ from codex_swap.cockpit import (
     CockpitImportError,
     import_into_store,
     load_cockpit_accounts,
+    load_cockpit_export,
 )
 from codex_swap.store import AccountStore
 from codex_swap.switcher import CodexAccountSwitcher
@@ -157,3 +158,76 @@ def test_wrong_key_is_a_clean_error(cockpit_home):
 def test_missing_directory_is_a_clean_error():
     with pytest.raises(CockpitImportError, match="not found"):
         load_cockpit_accounts("/nonexistent/cockpit")
+
+
+# ------------------------------------------------------- export-file import
+
+
+def _export_record(cockpit_id: str, email: str, account_id: str, iat: float) -> dict:
+    """One CodexAccount as the Cockpit UI's export writes it (plaintext)."""
+    return {
+        "id": cockpit_id,
+        "email": email,
+        "auth_mode": "oauth",
+        "account_id": account_id,
+        "plan_type": "pro",
+        "tokens": {
+            "id_token": "header.e30.sig",
+            "access_token": (
+                _b64url({"alg": "RS256", "typ": "JWT"})
+                + "."
+                + _b64url({
+                    "exp": iat + 864000,
+                    "iat": iat,
+                    "https://api.openai.com/auth": {
+                        "chatgpt_account_id": account_id,
+                        "chatgpt_plan_type": "pro",
+                    },
+                    "https://api.openai.com/profile": {"email": email},
+                })
+                + ".sig"
+            ),
+            "refresh_token": f"rt.1.{account_id}",
+        },
+        "token_generation": 1,
+        "token_updated_at": iat,
+        "created_at": iat,
+        "last_used": iat,
+    }
+
+
+def test_export_file_import(cockpit_home, tmp_path):
+    export = tmp_path / "cockpit-export.json"
+    now = time.time()
+    export.write_text(json.dumps([
+        _export_record("codex_x", "x@x.io", "acc-x", now),
+        {"id": "junk", "email": "n@tokens.io", "auth_mode": "api_key"},  # skipped
+    ]))
+
+    accounts = load_cockpit_export(str(export))
+    assert len(accounts) == 1 and accounts[0].identity.email == "x@x.io"
+
+    report = import_into_store(AccountStore(), accounts)
+    assert report == [{"email": "x@x.io", "slot": 1, "action": "added"}]
+    stored = json.loads(AccountStore().read_credential(AccountStore().find(1)))
+    assert stored["tokens"]["refresh_token"] == "rt.1.acc-x"
+
+
+def test_export_file_rejects_non_array(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{\"not\": \"an array\"}")
+    with pytest.raises(CockpitImportError, match="not a Cockpit account export"):
+        load_cockpit_export(str(bad))
+
+
+def test_export_file_and_store_share_freshness_rule(live_auth, cockpit_home, tmp_path):
+    """An export older than the live capture must not downgrade slot 1."""
+    sw = CodexAccountSwitcher()
+    sw.add()  # slot 1: user@example.com / acc-1234, fresh
+
+    export = tmp_path / "older-export.json"
+    export.write_text(json.dumps([
+        _export_record("codex_same", "user@example.com", "acc-1234", time.time() - 86400),
+    ]))
+    report = import_into_store(sw.store, load_cockpit_export(str(export)))
+    assert report[0]["action"] == "kept-newer"

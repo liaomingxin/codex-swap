@@ -8,11 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `cxswap import-cockpit [--path DIR] [--json]`: import Codex accounts
-  from Antigravity Cockpit Tools' encrypted store (AES-256-GCM with the
-  local key file). Newest-token-wins: a slot's credentials are never
-  downgraded to an older copy. Needs the `cockpit` extra
-  (`uv tool install --editable '.[cockpit]'`).
+- `cxswap import-cockpit [--path DIR] [--file JSON] [--json]`: import Codex
+  accounts from Cockpit Tools — either the local encrypted store
+  (AES-256-GCM with the key file, needs the `cockpit` extra) or a
+  plaintext UI export file (`--file`, zero extra deps, cross-machine).
+  Newest-token-wins: a slot's credentials are never downgraded to an
+  older copy.
 - Fixed identity parsing: JWT claims are now read from both the AUTH and
   PROFILE namespaces (an `or`-chain shadowed the second when both were
   present, e.g. emails in access tokens).

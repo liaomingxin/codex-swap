@@ -166,6 +166,47 @@ def load_cockpit_accounts(root_override: str | None = None) -> list[CockpitAccou
     return out
 
 
+def load_cockpit_export(path: str) -> list[CockpitAccount]:
+    """Load accounts from a Cockpit UI export (plaintext JSON array).
+
+    Same ``CodexAccount`` shape the encrypted store decrypts to — no key,
+    no cryptography dependency, and it may come from another machine."""
+    file = Path(path).expanduser()
+    try:
+        data = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise CockpitImportError(f"Cannot read {file}: {e}") from e
+    if not isinstance(data, list):
+        raise CockpitImportError(
+            f"{file} is not a Cockpit account export (expected a JSON array)"
+        )
+
+    out: list[CockpitAccount] = []
+    for record in data:
+        if not isinstance(record, dict):
+            continue
+        tokens = record.get("tokens")
+        if not isinstance(tokens, dict) or not tokens.get("refresh_token"):
+            continue  # api-key or reauth-required entries can't be managed
+        try:
+            auth = _to_auth_json(record)
+        except CockpitImportError:
+            continue
+        identity = identity_from_auth(auth)
+        if identity is None:
+            continue
+        updated = record.get("token_updated_at")
+        out.append(
+            CockpitAccount(
+                cockpit_id=str(record.get("id") or ""),
+                auth=auth,
+                identity=identity,
+                token_updated_at=float(updated) if isinstance(updated, (int, float)) else 0.0,
+            )
+        )
+    return out
+
+
 def import_into_store(store, accounts: list[CockpitAccount]) -> list[dict]:
     """Upsert decrypted accounts into the slot store, newest-token-wins.
 

@@ -152,7 +152,11 @@ app), one command migrates them over:
 
 ```bash
 uv tool install --editable '.[cockpit]'   # adds the decryption dependency
-cxswap import-cockpit
+cxswap import-cockpit                      # decrypt the local store directly
+
+# or, from Cockpit's UI (Accounts -> Export): no extra dependency needed,
+# and the file can come from another machine
+cxswap import-cockpit --file ~/Downloads/accounts.json
 ```
 
 Accounts are decrypted locally (key file + AES-256-GCM, nothing leaves the
