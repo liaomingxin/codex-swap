@@ -1,0 +1,45 @@
+[project]
+name = "codex-swap"
+version = "0.1.0"
+description = "Multi-account switcher for OpenAI Codex CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "liaomingxin" }]
+keywords = ["codex", "openai", "codex-cli", "account-switcher", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+# Zero runtime dependencies on purpose: the whole job is reading/writing one
+# JSON file and parsing JWTs we never verify. Fewer deps = fewer supply-chain
+# risks for a tool that sits next to your credentials.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/liaomingxin/codex-swap"
+
+[project.scripts]
+cxswap = "codex_swap.cli:main"
+codex-swap = "codex_swap.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_swap"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
