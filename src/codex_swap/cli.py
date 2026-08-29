@@ -14,7 +14,7 @@ import sys
 import time
 from datetime import UTC, datetime
 
-from codex_swap import __version__
+from codex_swap import __version__, display
 from codex_swap.exceptions import CodexSwapError
 from codex_swap.switcher import CodexAccountSwitcher
 
@@ -166,26 +166,86 @@ def _cmd_unclaimed(args: argparse.Namespace) -> int:
     return 0
 
 
-def _fmt_reset(reset_at: int | None) -> str:
-    if not reset_at:
-        return "-"
-    remaining = reset_at - time.time()
-    if remaining <= 0:
-        return "resetting"
-    hours = remaining / 3600
-    if hours >= 48:
-        return f"{hours / 24:.0f}d"
-    if hours >= 1:
-        return f"{hours:.0f}h"
-    return f"{remaining / 60:.0f}m"
+def _window_row(label: str, window: dict, now: float) -> str:
+    """One account-level window line: label + bar + pct + reset times."""
+    pct = float(window.get("usedPercent", 0))
+    bar_txt = display.bar(pct)
+    pct_txt = display.paint(f"{pct:3.0f}%", display.health_color(pct))
+    hit = (
+        "  " + display.paint("LIMIT REACHED", "\x1b[31m") if window.get("limitReached") else ""
+    )
+    reset = display.fmt_reset(window.get("resetsAt"), now=now)
+    return f"  {label:<8} {bar_txt}  {pct_txt}   {reset}{hit}"
 
 
-def _fmt_window(window: dict | None) -> str:
-    if not window:
-        return "-"
-    hours = window.get("windowSeconds", 0) / 3600
-    tag = f"{hours:.0f}h" if hours < 168 else f"{hours / 24:.0f}d"
-    return f"{window.get('usedPercent', 0):.0f}% ({tag})"
+def _model_lines(model_limits: list[dict], now: float) -> list[str]:
+    """Per-model limit rows, compact and dim (they ride below the mains)."""
+    lines = []
+    for m in model_limits:
+        parts = []
+        for key in ("primaryWindow", "secondaryWindow"):
+            w = m.get(key)
+            if not w:
+                continue
+            pct = float(w.get("usedPercent", 0))
+            label = display.window_label(w.get("windowSeconds", 0))
+            reset = display.fmt_reset(w.get("resetsAt"), now=now)
+            pct_txt = display.paint(f"{pct:.0f}%", display.health_color(pct))
+            parts.append(f"{label} {pct_txt} → {reset}")
+        if parts:
+            name = (m.get("name") or "?")[:28]
+            lines.append(f"  {display.paint('·', '\x1b[36m')} {name:<30} {'   '.join(parts)}")
+    return lines
+
+
+def _account_card(row: dict, now: float) -> list[str]:
+    """A card per account: header + window bars + model limits."""
+    usage = row.get("usage")
+    number = row["number"]
+    email = (row.get("email") or "?")[:36]
+    plan = (usage or {}).get("planType") or row.get("plan") or "-"
+
+    if row.get("active"):
+        marker = display.paint("●", "\x1b[36m\x1b[1m")
+        tail = display.paint("◀ active", "\x1b[36m")
+        header = f"{marker} {display.bold(f'{number}  {email}')}"
+        plan_txt = display.dim(f"· {plan}")
+        head_line = f"{header} {plan_txt}  {tail}"
+    else:
+        marker = display.paint("○", "\x1b[2m")
+        head_line = f"{marker} {number}  {email} {display.dim(f'· {plan}')}"
+
+    # token freshness rides on the header's meta when we know it
+    lines = [head_line]
+    if not usage:
+        status = row.get("usageStatus", "ok")
+        note = {
+            "auth-needed": "token expired — switch here and run codex once, then re-add",
+            "error": row.get("usageError", "unavailable"),
+        }.get(status, "no data yet")
+        lines.append(f"  {display.paint(note, '\x1b[33m')}")
+        return lines
+
+    primary = usage.get("primaryWindow")
+    secondary = usage.get("secondaryWindow")
+    if primary:
+        label = display.window_label(primary.get("windowSeconds", 0))
+        lines.append(_window_row(label, primary, now))
+    if secondary:
+        label = display.window_label(secondary.get("windowSeconds", 0))
+        lines.append(_window_row(label, secondary, now))
+    lines.extend(_model_lines(usage.get("modelLimits", []), now))
+
+    age = row.get("usageAgeSeconds")
+    status = row.get("usageStatus", "ok")
+    meta = []
+    if usage.get("limitReached"):
+        meta.append(display.paint("limit reached", "\x1b[31m"))
+    if status == "stale" and isinstance(age, (int, float)):
+        meta.append(display.dim(f"cached {display.fmt_age(age)}"))
+    if meta:
+        lines.append(f"  {'   '.join(meta)}")
+    return lines
 
 
 def _cmd_usage(args: argparse.Namespace) -> int:
@@ -196,56 +256,14 @@ def _cmd_usage(args: argparse.Namespace) -> int:
     if not payload["accounts"]:
         _out("No accounts stored. Run `codex login`, then `cxswap add`.")
         return 0
-    _say(
-        args,
-        f"{'*':<2} {'#':<4} {'EMAIL':<30} {'PLAN':<6} {'WINDOW':<14} {'5H':<12} {'RESETS IN'}",
-    )
-    for row in payload["accounts"]:
-        mark = "*" if row["active"] else " "
-        usage = row.get("usage")
-        status = row.get("usageStatus", "ok")
-        if usage:
-            plan = usage.get("planType") or row.get("plan") or "-"
-            window = _fmt_window(usage.get("primaryWindow"))
-            # account-level primary is weekly-shaped; any 5h-shaped window
-            # (account secondary or a model's primary) is the burst budget
-            five_hour = "-"
-            candidates = [usage.get("secondaryWindow")] + [
-                m.get("primaryWindow") for m in usage.get("modelLimits", [])
-            ]
-            for cand in candidates:
-                if cand and (cand.get("windowSeconds") or 0) <= 6 * 3600:
-                    five_hour = _fmt_window(cand)
-                    break
-            reset = usage.get("primaryWindow", {}).get("resetsAt")
-            age_note = ""
-            age = row.get("usageAgeSeconds")
-            if status == "stale" and isinstance(age, (int, float)):
-                age_note = f"  · {age // 60}m ago"
-            _say(
-                args,
-                f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} "
-                f"{plan:<6} {window:<14} {five_hour:<12} {_fmt_reset(reset)}{age_note}",
-            )
-            for m in usage.get("modelLimits", []):
-                name = (m.get("name") or "?")[:24]
-                _say(
-                    args,
-                    f"{'':>8}{name:<26} {_fmt_window(m.get('primaryWindow')):<14} "
-                    f"{_fmt_window(m.get('secondaryWindow'))}",
-                )
-        else:
-            plan = row.get("plan") or "-"
-            note = {
-                "auth-needed": "token expired — switch to it and run codex once, then re-add",
-                "stale": "no data yet",
-                "error": row.get("usageError", "unavailable"),
-            }.get(status, "no data")
-            _say(
-                args,
-                f"{mark:<2} {row['number']:<4} {(row.get('email') or '?')[:29]:<30} "
-                f"{plan:<6} {note}",
-            )
+    now = time.time()
+    blocks = [_account_card(row, now) for row in payload["accounts"]]
+    sep = display.dim("─" * 68)
+    for i, block in enumerate(blocks):
+        if i:
+            print(sep)
+        for line in block:
+            print(line)
     return 0
 
 
@@ -447,7 +465,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--path", metavar="DIR", help="Cockpit directory (default ~/.antigravity_cockpit)"
     )
     p.add_argument(
-        "--file", metavar="JSON",
+        "--file",
+        metavar="JSON",
         help="Import a Cockpit UI export file instead of the local store",
     )
     p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)

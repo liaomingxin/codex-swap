@@ -176,15 +176,17 @@ def _export_record(cockpit_id: str, email: str, account_id: str, iat: float) -> 
             "access_token": (
                 _b64url({"alg": "RS256", "typ": "JWT"})
                 + "."
-                + _b64url({
-                    "exp": iat + 864000,
-                    "iat": iat,
-                    "https://api.openai.com/auth": {
-                        "chatgpt_account_id": account_id,
-                        "chatgpt_plan_type": "pro",
-                    },
-                    "https://api.openai.com/profile": {"email": email},
-                })
+                + _b64url(
+                    {
+                        "exp": iat + 864000,
+                        "iat": iat,
+                        "https://api.openai.com/auth": {
+                            "chatgpt_account_id": account_id,
+                            "chatgpt_plan_type": "pro",
+                        },
+                        "https://api.openai.com/profile": {"email": email},
+                    }
+                )
                 + ".sig"
             ),
             "refresh_token": f"rt.1.{account_id}",
@@ -199,10 +201,14 @@ def _export_record(cockpit_id: str, email: str, account_id: str, iat: float) -> 
 def test_export_file_import(cockpit_home, tmp_path):
     export = tmp_path / "cockpit-export.json"
     now = time.time()
-    export.write_text(json.dumps([
-        _export_record("codex_x", "x@x.io", "acc-x", now),
-        {"id": "junk", "email": "n@tokens.io", "auth_mode": "api_key"},  # skipped
-    ]))
+    export.write_text(
+        json.dumps(
+            [
+                _export_record("codex_x", "x@x.io", "acc-x", now),
+                {"id": "junk", "email": "n@tokens.io", "auth_mode": "api_key"},  # skipped
+            ]
+        )
+    )
 
     accounts = load_cockpit_export(str(export))
     assert len(accounts) == 1 and accounts[0].identity.email == "x@x.io"
@@ -215,7 +221,7 @@ def test_export_file_import(cockpit_home, tmp_path):
 
 def test_export_file_rejects_non_array(tmp_path):
     bad = tmp_path / "bad.json"
-    bad.write_text("{\"not\": \"an array\"}")
+    bad.write_text('{"not": "an array"}')
     with pytest.raises(CockpitImportError, match="not a Cockpit account export"):
         load_cockpit_export(str(bad))
 
@@ -226,8 +232,14 @@ def test_export_file_and_store_share_freshness_rule(live_auth, cockpit_home, tmp
     sw.add()  # slot 1: user@example.com / acc-1234, fresh
 
     export = tmp_path / "older-export.json"
-    export.write_text(json.dumps([
-        _export_record("codex_same", "user@example.com", "acc-1234", time.time() - 86400),
-    ]))
+    export.write_text(
+        json.dumps(
+            [
+                _export_record(
+                    "codex_same", "user@example.com", "acc-1234", time.time() - 86400
+                ),
+            ]
+        )
+    )
     report = import_into_store(sw.store, load_cockpit_export(str(export)))
     assert report[0]["action"] == "kept-newer"
